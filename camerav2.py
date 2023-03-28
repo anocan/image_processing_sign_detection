@@ -2,21 +2,28 @@ import numpy as np
 import cv2
 import pytesseract as pyt
 from collections import Counter
+import math
  
 DEBUG = 1 #SET 1 FOR DEBUG PURPOSES
-dev_binary = 1
+dev_binary = 1 #1 FOR BINARY FRAME 0 FOR OCR FRAME
 file_name = 'IMGPRCSNG.jpg'
+WIDTH=480
+HEIGHT=360
+
 cap = cv2.VideoCapture(0)
-WIDTH=640
-HEIGHT=480
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
-OUTPUT = []
-THRESHOLD = 5 # HIGH VALUE = HIGH ACCURACY, MORE TIME
-binaryThreshConstant = 200
+
+OUTPUT = [] #SINGLE SIGN
+RESULT = [] #ALL OF THE SIGNS
+THRESHOLD = 10 # HIGH VALUE = HIGH ACCURACY, MORE TIME
+binaryThreshConstant = 210 #200
+binaryLowerConstant = 180
 verify_timer = 0
 global_timer = 0
-globalTimerConstant = 300
+globalTimerConstant = 200
+globalCropCoX = 6
+globalCropCoY = 8
 
 #Detection and Correction Functions
 
@@ -39,11 +46,20 @@ def detectText(): #OCR
     ###APPLY COLOR FILTER FOR ACCURATE OCR
 
     global binaryThreshConstant
+    global globalCropCoX
+    global globalCropCoY
 
     # Conversion to CMYK (just the K channel):
+    binaryFrame = frame.copy()
+    originX=0
+    originY=0
+    cropX=math.floor(WIDTH/globalCropCoX)
+    cropY=math.floor(HEIGHT/globalCropCoY)
+    crop_binary = binaryFrame[originY+cropY:originY+(HEIGHT-cropY), originX+cropX:originX+(WIDTH-cropX)]
+    crop_frame = frame[originY+cropY:originY+(HEIGHT-cropY), originX+cropX:originX+(WIDTH-cropX)]
 
     # Convert to float and divide by 255:
-    imgFloat = frame.copy().astype(np.double) / 255.
+    imgFloat = crop_binary.astype(np.double) / 255.
 
     # Calculate channel K:
     kChannel = 1 - np.max(imgFloat, axis=2)
@@ -79,9 +95,9 @@ def detectText(): #OCR
         b = b.split(' ')   
         if DEBUG:
             x,y,w,h = int(b[1]),int(b[2]),int(b[3]),int(b[4])
-            hImg, wImg,_ = frame.shape
-            cv2.rectangle(frame,(x,hImg-y),(w,hImg-h),(0,0,255),3)
-            cv2.putText(frame,b[0],(x,hImg-y+25),cv2.FONT_HERSHEY_COMPLEX,1,(50,50,255),2)
+            hImg, wImg,_ = crop_frame.shape
+            cv2.rectangle(crop_frame,(x,hImg-y),(w,hImg-h),(0,0,255),3)
+            cv2.putText(crop_frame,b[0],(x,hImg-y+25),cv2.FONT_HERSHEY_COMPLEX,1,(50,50,255),2)
         OUTPUT.append(b[0])
         #if DEBUG: 
         #    print(OUTPUT)
@@ -91,21 +107,26 @@ def detectText(): #OCR
 def verifyText(input): #CHECK FOR CHARACTER LENGTH
     global verify_timer
     global binaryThreshConstant
-    timer_threshold = 20 
+    global binaryLowerConstant
+    timer_threshold = 10 
     binaryThreshRate = 5
-    #0.25
+    #0.5
 
     if len(input) != 4:
         if verify_timer<timer_threshold:
             verify_timer += 1
         elif verify_timer>=timer_threshold:
-            if binaryThreshConstant != 150:
+            if binaryThreshConstant != binaryLowerConstant:
                 binaryThreshConstant -= binaryThreshRate
                 verify_timer = 0
                 print(binaryThreshConstant)
+            else:
+                binaryThreshConstant = 210
     else:
         if input[2] == '2':
             input[2] = 'Z'
+        if input[1] == 'A':
+            input[1] = '4'
         for i in range(len(input)):
             if input[i] != 'l':
                 continue
@@ -134,16 +155,16 @@ def similarity(i):
     global global_timer
     global binaryThreshConstant
 
-    if not i:
-        global_timer = 0
-        binaryThreshConstant = 200
-        return 0
     out = []
     for l in range(4):
         temp = []
         for k in i:
             temp.append(k[l])
-        out.append(max(z for z,v in Counter(temp).items() if v>1))
+        out.append(max((z for z,v in Counter(temp).items() if v>1),default='NULL'))
+        if 'NULL' in out:
+            global_timer = 0
+            binaryThreshConstant = 210
+            OUTPUT.clear()
     return out
 
 ####MAIN FUNCTION
@@ -169,7 +190,7 @@ while True:
     verifyText(detectText())
             
     if DEBUG and global_timer>=globalTimerConstant:
-        print(global_timer)
+        print('OVERTIME')
 
     if len(OUTPUT)>=THRESHOLD or global_timer>=globalTimerConstant:
         c=0
@@ -180,13 +201,34 @@ while True:
                 #print(i)
         if c == 0 or global_timer>=globalTimerConstant:
             global_timer=0
-            print(similarity(OUTPUT))
-        #print(OUTPUT)
-            #ACTION
+            binaryThreshConstant=210
+            #print(similarity(OUTPUT))
+
+            ###ACTION
+            RESULT.append(similarity(OUTPUT))
+            print(RESULT)
+            OUTPUT.clear()
+
+            #CHECK IF ARDUINO AT THE LAST SIGN
+            #IF NOT
+                #TRIGGER ARDUINO TO MOVE 
+                #WAIT COMMAND FROM ARDUINO
+                #TRIGGER OCR
+                #GO BACK TO THE ALGORITHM
+            #IF YES
+                #if 'NULL' in RESULT: RESULT.remove('NULL') ['D','4','NULL','3']
+                #CONVERT DATA ELIGIBLE TO BLUNTALGO
+                #RETURN TO THE BEGINNING
+
+            #print(RESULT)
 
     # Display the resulting frame
     if not dev_binary:
-        cv2.imshow('frame', frame)
+        originX=0
+        originY=0
+        cropX=math.floor(WIDTH/globalCropCoX)
+        cropY=math.floor(HEIGHT/globalCropCoY)
+        cv2.imshow('frame', frame[originY+cropY:originY+(HEIGHT-cropY), originX+cropX:originX+(WIDTH-cropX)])
 
 
     if cv2.waitKey(1) == ord('q'):
