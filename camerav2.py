@@ -3,10 +3,14 @@ import cv2
 import pytesseract as pyt
 from collections import Counter
 import math
+import itertools
+import serial
+import os
  
 DEBUG = 1 #SET 1 FOR DEBUG PURPOSES
-dev_binary = 1 #1 FOR BINARY FRAME 0 FOR OCR FRAME
+dev_binary = 0 #1 FOR BINARY FRAME 0 FOR OCR FRAME
 file_name = 'IMGPRCSNG.jpg'
+data_path = 'data.txt'
 WIDTH=480
 HEIGHT=360
 
@@ -16,7 +20,8 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
 
 OUTPUT = [] #SINGLE SIGN
 RESULT = [] #ALL OF THE SIGNS
-THRESHOLD = 10 # HIGH VALUE = HIGH ACCURACY, MORE TIME
+THRESHOLD = 5 # HIGH VALUE = HIGH ACCURACY, MORE TIME
+signCount = 0
 binaryThreshConstant = 210 #200
 binaryLowerConstant = 180
 verify_timer = 0
@@ -167,12 +172,58 @@ def similarity(i):
             OUTPUT.clear()
     return out
 
+def nullBreaker(input):
+    rm=[]
+    for i in range(len(input)):
+        for r in range(4):
+            if input[i][r] == 'NULL':
+                rm.append(input[i])
+    l2 = [x for x in input if x not in rm]
+    return l2
+
+def bluntAlgoConverter(input):
+    consec = list(itertools.chain.from_iterable(input))
+    l3 = []
+    for i in range(0,len(consec),2):
+        l3.append(consec[i]+consec[i+1])
+    return l3
+
 ####MAIN FUNCTION
 
 if not cap.isOpened():
     print("Cannot open camera")
     exit()
 while True:
+    
+    #CHECK IF ARDUINO AT THE LAST SIGN
+    #IF NOT
+        #TRIGGER ARDUINO TO MOVE 
+        #WAIT COMMAND FROM ARDUINO -> signCount++
+        #TRIGGER OCR
+        #GO BACK TO THE ALGORITHM
+    #IF YES
+        #if 'NULL' in RESULT: RESULT.remove('NULL') ['D','4','NULL','3']
+        #CONVERT DATA ELIGIBLE TO BLUNTALGO 
+        #WRITE AT A TXT FILE
+        #CALL BLUNTALGO SCRIPT
+        #EXIT PROGRAM
+
+    #if signCount != 8:
+        ##### TRIGGER ARDUINO TO MOVE & WAIT COMMAND FROM ARDUINO
+        #if __name__ == '__main__':
+            #ser = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
+            #ser.reset_input_buffer()
+
+            #while True:
+                #ser.write('move'.encode('utf-8')) #SEND 'move' TO ARDUINO
+                #response = ser.read()
+                #if response != b'':
+                    #if int.from_bytes(response, byteorder='big') == 200:
+                        ##print('stopped')
+                        #break
+    #########
+    #signCount += 1 
+    #while True:
     global_timer += 1
 
     # Capture frame-by-frame
@@ -208,19 +259,7 @@ while True:
             RESULT.append(similarity(OUTPUT))
             print(RESULT)
             OUTPUT.clear()
-
-            #CHECK IF ARDUINO AT THE LAST SIGN
-            #IF NOT
-                #TRIGGER ARDUINO TO MOVE 
-                #WAIT COMMAND FROM ARDUINO
-                #TRIGGER OCR
-                #GO BACK TO THE ALGORITHM
-            #IF YES
-                #if 'NULL' in RESULT: RESULT.remove('NULL') ['D','4','NULL','3']
-                #CONVERT DATA ELIGIBLE TO BLUNTALGO
-                #RETURN TO THE BEGINNING
-
-            #print(RESULT)
+            #break
 
     # Display the resulting frame
     if not dev_binary:
@@ -233,7 +272,18 @@ while True:
 
     if cv2.waitKey(1) == ord('q'):
         break
+    ######### 
+
+    #else:
+        #RESULT = nullBreaker(RESULT)
+        #RESULT = bluntAlgoConverter(RESULT) #Convert Data Eligible to bluntAlgo
+        #with open(data_path, 'w') as f:
+            #f.write(str(RESULT))
+        #break
 
 # When everything done, release the capture
 cap.release()
 cv2.destroyAllWindows()
+
+#os.system('bluntAlgo.py')
+#exit()
