@@ -7,33 +7,41 @@ import itertools
 import serial
 import os
 import time
+from datetime import datetime
  
-DEBUG = 1 #SET 1 FOR DEBUG PURPOSES
-dev_binary = 0 #1 FOR BINARY FRAME 0 FOR OCR FRAME
-file_name = 'IMGPRCSNG.jpg'
-data_path = 'data.txt'
+DEBUG = 1 # SET 1 FOR DEBUG PURPOSES
+dev_binary =  0 #1 FOR BINARY FRAME 0 FOR OCR FRAME
+file_name = '/home/logipi/Desktop/FIN/IMGPRCSNG.jpg'
+data_path = '/home/logipi/Desktop/FIN/data.txt'
+path_algo = '/home/logipi/Desktop/FIN/bluntAlgo-SerialCom.py'
 WIDTH=480
 HEIGHT=360
 
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap.set(cv2.CAP_PROP_FPS, 2)
+cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
 
 OUTPUT = [] #SINGLE SIGN
 RESULT = [] #ALL OF THE SIGNS
-THRESHOLD = 5 # HIGH VALUE = HIGH ACCURACY, MORE TIME
+THRESHOLD = 3 # HIGH VALUE = HIGH ACCURACY, MORE TIME (BELOW 3 IS NOT ADVISED)
 signCount = 0
-binaryThreshConstant = 210 #200
+binaryThreshConstant = 200 #200
 binaryLowerConstant = 180
 verify_timer = 0
 global_timer = 0
 globalTimerConstant = 40 # seconds
 globalCropCoX = 6
 globalCropCoY = 8
+totalSigns = 3
 
 move = "move"
 ocr = 100
-path = '/dev/cu.usbserial-110' #/dev/ttyACM0 , /dev/cu.usbserial-110
+brk = 45
+path = '/dev/ttyUSB0' #/dev/ttyACM0 , /dev/cu.usbserial-110
+penisoid = 0
 
 #Detection and Correction Functions
 
@@ -51,6 +59,35 @@ def areaFilter(minArea, inputImage): #FILTER
     filteredImage = np.where(np.isin(labeledImage, remainingComponentLabels) == True, 255, 0).astype('uint8')
 
     return filteredImage
+
+def serialCom(mode):
+    if __name__ == '__main__':
+        ser = serial.Serial(path, 9600, timeout=1)
+        ser.reset_input_buffer()
+
+        while True:
+            t = 0.01
+            if not (mode == "only-read"):
+                ser.write(move.encode('utf-8'))
+                response = ser.read()
+                print('{}:{} Writing {}, Waiting for {}... Response= {}' . format(datetime.now().minute,datetime.now().second,move,brk,response))
+                if response != b'':
+                    if response[0] == brk:
+                        # loop broken
+                        print('loop broken')
+                        ser.close()
+                        break
+                time.sleep(t)
+            else:
+                response = ser.read()
+                print('{}:{} Waiting for {}... Response= {}' . format(datetime.now().minute,datetime.now().second,ocr,response))
+                if response != b'':
+                    if response[0] == ocr:
+                        # DO OCR
+                        print('ocr')
+                        ser.close()
+                        break
+                time.sleep(t)
 
 def detectText(): #OCR
     ###APPLY COLOR FILTER FOR ACCURATE OCR
@@ -118,7 +155,7 @@ def verifyText(input): #CHECK FOR CHARACTER LENGTH
     global verify_timer
     global binaryThreshConstant
     global binaryLowerConstant
-    timer_threshold = 10 
+    timer_threshold = 5 
     binaryThreshRate = 5
     #0.5
 
@@ -211,6 +248,7 @@ while True:
         #if 'NULL' in RESULT: RESULT.remove('NULL') ['D','4','NULL','3']
         #CONVERT DATA ELIGIBLE TO BLUNTALGO 
         #WRITE AT A TXT FILE
+        #TRIGGER ARDUINO TO MOVE BACK TO START
         #CALL BLUNTALGO SCRIPT
         #EXIT PROGRAM
 
@@ -228,23 +266,16 @@ while True:
                         ##print('stopped')
                         #break
     #########
-    if signCount != 8:
-        if __name__ == '__main__':
-            ser = serial.Serial(path, 9600, timeout=1)
-            ser.reset_input_buffer()
+    if signCount != totalSigns:
+        serialCom("only-read")
 
-        while True:
-            ser.write(move.encode('utf-8'))
-            response = ser.read()
-            print('Response= {}' . format(response))
-            if response != b'':
-                if response[0] == ocr:
-                    # DO OCR
-                    print('moved!')
-                    ser.close()
-                    break
-            time.sleep(1)
-
+        if penisoid:
+            cap = cv2.VideoCapture(0)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_FPS, 2)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
         while True:
             end_time = time.time()
             global_timer = end_time - start_time
@@ -256,7 +287,7 @@ while True:
                 print("Can't receive frame (stream end?). Exiting ...")
                 break
             # Our operations on the frame come here
-
+            #while not (os.path.exists(file_name)):
             cv2.imwrite(file_name,frame)
             gray = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2GRAY)
 
@@ -265,6 +296,7 @@ while True:
                     
             if DEBUG and global_timer>=globalTimerConstant:
                 print('OVERTIME')
+                print(global_timer)
 
             if len(OUTPUT)>=THRESHOLD or global_timer>=globalTimerConstant:
                 c=0
@@ -274,6 +306,10 @@ while True:
                         OUTPUT.remove(i)
                         #print(i)
                 if c == 0 or global_timer>=globalTimerConstant:
+                    serialCom("SEX")
+
+                    penisoid = 1
+                    cap.release()
                     global_timer=0
                     binaryThreshConstant=210
                     #print(similarity(OUTPUT))
@@ -309,7 +345,8 @@ while True:
         RESULT = bluntAlgoConverter(RESULT) #Convert Data Eligible to bluntAlgo
         with open(data_path, 'w') as f:
             f.write(str(RESULT))
+            f.close()
         break
 
-#os.system('bluntAlgo.py')
-#exit()
+os.system('{} {}' .format('python',path_algo))
+exit()
